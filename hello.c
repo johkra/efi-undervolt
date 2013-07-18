@@ -86,7 +86,7 @@ void print_extended_vendor() {
 }
 
 void boot_option(EFI_HANDLE ImageHandle, CHAR16* skipOption, UINT16 code) {
-	UINTN var_size, str_size;
+	UINTN str_size;
 	void* boot;
 	CHAR16 VarBoot[16] = { 0 };
 	CHAR16* Description;
@@ -96,7 +96,7 @@ void boot_option(EFI_HANDLE ImageHandle, CHAR16* skipOption, UINT16 code) {
 	EFI_DEVICE_PATH* path;
 
 	SPrint(VarBoot, sizeof(VarBoot), L"Boot%04x", code);
-  	boot = LibGetVariableAndSize(VarBoot, &gEfiGlobalVariableGuid, &var_size);
+  	boot = LibGetVariable(VarBoot, &gEfiGlobalVariableGuid);
 
 	str_size = StrSize(boot + sizeof(UINT32) + sizeof(UINT16));
 	Description = AllocatePool(str_size);
