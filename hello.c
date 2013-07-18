@@ -114,100 +114,59 @@ void print_extended_vendor() {
 
 }
 
-void read_boot_option(UINT16 code) {
-	HARDDRIVE_DEVICE_PATH hd_dv_path;
-	FILEPATH_DEVICE_PATH* fp_dv_path = AllocateZeroPool(SIZE_OF_FILEPATH_DEVICE_PATH + sizeof(EFI_DEVICE_PATH));
-	EFI_DEVICE_PATH end_path;
-	UINTN var_size, str_size, opt_size;
-	UINT16 FilePathListLength;
+void boot_option(EFI_HANDLE ImageHandle, CHAR16* skipOption, UINT16 code) {
+	UINTN var_size, str_size;
 	void* boot;
-	void* pos;
 	CHAR16 VarBoot[16] = { 0 };
 	CHAR16* Description;
-	UINT8* OptionalData;
+	EFI_HANDLE image;
+	EFI_STATUS err;
+
+	EFI_DEVICE_PATH* path;
 
 	SPrint(VarBoot, sizeof(VarBoot), L"Boot%04x", code);
   	boot = LibGetVariableAndSize(VarBoot, &gEfiGlobalVariableGuid, &var_size);
 
-	pos = boot;
-	pos += sizeof(UINT32); // Skip Attributes	
-	CopyMem(&FilePathListLength, pos, sizeof(UINT16));
-	pos += sizeof(UINT16);
-
-	str_size = StrSize(pos);
+	str_size = StrSize(boot + sizeof(UINT32) + sizeof(UINT16));
 	Description = AllocatePool(str_size);
-	StrCpy(Description, pos);
-	pos += str_size;
+	StrCpy(Description, boot + sizeof(UINT32) + sizeof(UINT16));
 
-	/* Skip ACPI/PCI/ATAPI device path elements. This is needed for elements created with TianoCore */
-	if (*(UINT8*)pos == 0x02 && *(UINT8*)(pos+1) == 0x01) {
-		pos += 12;
-	}	
-	if (*(UINT8*)pos == 0x01 && *(UINT8*)(pos+1) == 0x01) {
-		pos += 6;
-	}	
-	if (*(UINT8*)pos == 0x03 && *(UINT8*)(pos+1) == 0x01) {
-		pos += 8;
-	}	
-
-	CopyMem(&hd_dv_path, pos, 42);
-	pos += 42;
-
-	if (hd_dv_path.Header.Type != 0x04 || hd_dv_path.Header.SubType != 0x01) {
+	if (StrCmp(skipOption, Description) == 0) {
+		Print(L"Skipping Hello Chain loader.\n");
 		FreePool(Description);
-		FreePool(fp_dv_path);
+		FreePool(boot);
 		return;
 	}
 
-	CopyMem(&fp_dv_path->Header, pos, 4);
-	pos += 4;
+	path = boot + sizeof(UINT32) + sizeof(UINT16) + str_size;
 
-	if (fp_dv_path->Header.Type != 0x04 || fp_dv_path->Header.SubType != 0x04) {
-		Print(L"Invalid file path header: %x %x\n", fp_dv_path->Header.Type, fp_dv_path->Header.SubType);
-		FreePool(Description);
-		FreePool(fp_dv_path);
+	Print(L"Description: %s\n", Description);
+  	Input(L"Press any key to boot this option.", NULL, 0);
+	err = uefi_call_wrapper(BS->LoadImage, 6, FALSE, ImageHandle, path , NULL, 0, &image);
+
+	FreePool(Description);
+
+	if (EFI_ERROR(err)) {
+		uefi_call_wrapper(BS->Stall, 1, 3 * 1000 * 1000);
+		Print(L"Error loading %s: %r", Description, err);
+		FreePool(boot);
 		return;
 	}
 	
-	fp_dv_path = ReallocatePool(fp_dv_path, SIZE_OF_FILEPATH_DEVICE_PATH + sizeof(EFI_DEVICE_PATH), (UINT16)*fp_dv_path->Header.Length);
-	StrCpy((CHAR16*)&fp_dv_path->PathName, pos);
-	pos += (UINT16)*fp_dv_path->Header.Length - 4;
-
-	CopyMem(&end_path.Type, pos, sizeof(UINT8));
-	pos += sizeof(UINT8);
-	CopyMem(&end_path.SubType, pos, sizeof(UINT8));
-	pos += sizeof(UINT8);
-	CopyMem(&end_path.Length, pos, 2*sizeof(UINT8));
-	pos += 2*sizeof(UINT8);
-
-	if (end_path.Type != 0x7f || end_path.SubType != 0xff) {
-		Print(L"Expected end device path header.\n");
-		FreePool(Description);
-		FreePool(fp_dv_path);
-		return;
+	err = uefi_call_wrapper(BS->StartImage, 3, image, NULL, NULL);
+	if (EFI_ERROR(err)) {
+		FreePool(boot);
+		Print(L"Error starting %s: %r", Description, err);
+		uefi_call_wrapper(BS->Stall, 1, 3 * 1000 * 1000);
 	}
 
-	opt_size = var_size - sizeof(UINT32) - sizeof(UINT16) - StrSize(Description) - FilePathListLength;
-
-	OptionalData = AllocatePool(opt_size);
-	CopyMem(OptionalData, pos, opt_size);
-
-	Print(L"%s\n", Description);
-	Print(L"%s\n", fp_dv_path->PathName);
-	DumpHex(0, 0, opt_size, OptionalData);
-
-	FreePool(Description);
-	FreePool(fp_dv_path);
-	FreePool(OptionalData);
+	FreePool(boot);
 }
 
 
 EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
   UINT16* boot_order;
-  
-  CHAR8 buffer[7];
   UINTN size, i;
-
 
   InitializeLib(ImageHandle, SystemTable);
 
@@ -216,9 +175,8 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
   print_extended_vendor();
 
   boot_order = LibGetVariableAndSize(VarBootOrder, &gEfiGlobalVariableGuid, &size);
-  CopyMem(buffer+4, "\r\n\0", 3);
   for (i = 0; i < size/sizeof(UINT16); i++) {
-    read_boot_option(*(boot_order+i));    
+    boot_option(ImageHandle, L"Hello Chain loader", *(boot_order+i));    
   }
   FreePool(boot_order);
 
