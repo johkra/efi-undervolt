@@ -18,6 +18,10 @@
 
 static EFI_GUID gEfiGlobalVariableGuid = EFI_GLOBAL_VARIABLE;
 
+void Sleep(UINTN seconds_to_sleep) {
+	uefi_call_wrapper(BS->Stall, 1, seconds_to_sleep * 1000 * 1000);
+}	
+
 void cpuid(UINT32 *eax, UINT32 *ebx, UINT32 *ecx, UINT32 *edx) {
         asm("cpuid;" :"+a" (*eax), "=b" (*ebx), "=c" (*ecx), "=d" (*edx));
 }
@@ -30,19 +34,6 @@ void wrmsr(UINT32 reg, UINT32 upper, UINT32 lower) {
 	asm("wrmsr;": : "d" (upper), "a" (lower), "c" (reg));
 }
 
-void itox(UINTN n, CHAR8* buffer, UINT8 size) {
-    UINT8 value;
-    UINT8 i = size * 2;
-
-    while(i--) {
-        value = (n >> 4*i) & 0xf;
-        if (value > 9) {
-            value += 'A' - '0' - 10;
-        }
-        buffer[size*2-i-1] = '0'+value;
-    }
-    
-}
 
 void ints_to_string(CHAR8* buffer, UINT32* a, UINT32* b, UINT32* c, UINT32* d) {
     UINT32* ints[] = {a, b, c, d, NULL};
@@ -63,41 +54,24 @@ struct pvclock_wall_clock {
 
 void print_time() {
   struct pvclock_wall_clock clock;
-  struct pvclock_wall_clock* clockaddr = &clock;
-  CHAR8 buffer[11];
 
-  wrmsr(0x4b564d00, (UINT32)((UINT64)clockaddr>>32 & 0xffffffff), (UINT32)((UINT64)clockaddr & 0xffffffff));
-  itox(clock.sec, buffer, sizeof(clock.sec));
-  CopyMem(buffer+8, "\r\n\0", 3);
-  APrint(buffer);
+  wrmsr(0x4b564d00, (UINT32)((UINT64)&clock>>32 & 0xffffffff), (UINT32)((UINT64)&clock & 0xffffffff));
+  Print(L"Time: %d\n", clock.sec);
 }
 
 void print_vendor() {
   UINT32 eax, ebx, ecx, edx;
-  CHAR8 vendor[15];
+  CHAR8 vendor[15] = {0};
 
   eax = 0;
   cpuid(&eax, &ebx, &ecx, &edx);
-  
   ints_to_string(vendor, &ebx, &edx, &ecx, NULL);
-  CopyMem(vendor+12, "\r\n\0", 3);
-  APrint(vendor);
-}
-
-UINTN strlen(CHAR8* str) {
-  CHAR8* pos = str;
-
-  while(*pos != '\0') {
-    pos++;
-  }
-  return pos-str;
+  Print(L"Vendor: %a\n", vendor);
 }
 
 void print_extended_vendor() {
   UINT32 eax, ebx, ecx, edx;
   CHAR8 vendor[50];
-  int offset = 0;
-  
 
   eax = 0x80000002;
   cpuid(&eax, &ebx, &ecx, &edx);
@@ -108,10 +82,7 @@ void print_extended_vendor() {
   eax = 0x80000004;
   cpuid(&eax, &ebx, &ecx, &edx);
   ints_to_string(vendor+32, &eax, &ebx, &ecx, &edx);
-  offset = strlen(vendor);
-  CopyMem(vendor+offset, "\r\n\0", 3);
-  APrint(vendor);
-
+  Print(L"Extended vendor: %a\n", vendor);
 }
 
 void boot_option(EFI_HANDLE ImageHandle, CHAR16* skipOption, UINT16 code) {
@@ -141,13 +112,14 @@ void boot_option(EFI_HANDLE ImageHandle, CHAR16* skipOption, UINT16 code) {
 	path = boot + sizeof(UINT32) + sizeof(UINT16) + str_size;
 
 	Print(L"Description: %s\n", Description);
+	Sleep(3);
   	Input(L"Press any key to boot this option.", NULL, 0);
 	err = uefi_call_wrapper(BS->LoadImage, 6, FALSE, ImageHandle, path , NULL, 0, &image);
 
 	FreePool(Description);
 
 	if (EFI_ERROR(err)) {
-		uefi_call_wrapper(BS->Stall, 1, 3 * 1000 * 1000);
+		Sleep(3);
 		Print(L"Error loading %s: %r", Description, err);
 		FreePool(boot);
 		return;
@@ -157,7 +129,7 @@ void boot_option(EFI_HANDLE ImageHandle, CHAR16* skipOption, UINT16 code) {
 	if (EFI_ERROR(err)) {
 		FreePool(boot);
 		Print(L"Error starting %s: %r", Description, err);
-		uefi_call_wrapper(BS->Stall, 1, 3 * 1000 * 1000);
+		Sleep(3);
 	}
 
 	FreePool(boot);
