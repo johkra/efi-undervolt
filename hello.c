@@ -86,48 +86,41 @@ void print_extended_vendor() {
 }
 
 void boot_option(EFI_HANDLE ImageHandle, CHAR16* skipOption, UINT16 code) {
-	UINTN str_size;
 	void* boot;
 	CHAR16 VarBoot[16] = { 0 };
-	CHAR16* Description;
 	EFI_HANDLE image;
 	EFI_STATUS err;
 
+	CHAR16* Description;
 	EFI_DEVICE_PATH* path;
 
 	SPrint(VarBoot, sizeof(VarBoot), L"Boot%04x", code);
   	boot = LibGetVariable(VarBoot, &gEfiGlobalVariableGuid);
 
-	str_size = StrSize(boot + sizeof(UINT32) + sizeof(UINT16));
-	Description = AllocatePool(str_size);
-	StrCpy(Description, boot + sizeof(UINT32) + sizeof(UINT16));
-
+	Description = boot + sizeof(UINT32) + sizeof(UINT16);
+	
 	if (StrCmp(skipOption, Description) == 0) {
 		Print(L"Skipping Hello Chain loader.\n");
-		FreePool(Description);
 		FreePool(boot);
 		return;
 	}
 
-	path = boot + sizeof(UINT32) + sizeof(UINT16) + str_size;
+	path = (void*)Description + StrSize(Description);
 
 	Print(L"Description: %s\n", Description);
 	Sleep(3);
   	Input(L"Press any key to boot this option.", NULL, 0);
 	err = uefi_call_wrapper(BS->LoadImage, 6, FALSE, ImageHandle, path , NULL, 0, &image);
 
-	FreePool(Description);
-
 	if (EFI_ERROR(err)) {
-		Sleep(3);
 		Print(L"Error loading %s: %r", Description, err);
 		FreePool(boot);
+		Sleep(3);
 		return;
 	}
 	
 	err = uefi_call_wrapper(BS->StartImage, 3, image, NULL, NULL);
 	if (EFI_ERROR(err)) {
-		FreePool(boot);
 		Print(L"Error starting %s: %r", Description, err);
 		Sleep(3);
 	}
@@ -137,8 +130,9 @@ void boot_option(EFI_HANDLE ImageHandle, CHAR16* skipOption, UINT16 code) {
 
 
 EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
-  UINT16* boot_order;
-  UINTN size, i;
+  UINT16 *boot_order;
+  UINT16 *pos;
+  UINTN size;
 
   InitializeLib(ImageHandle, SystemTable);
 
@@ -147,8 +141,8 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
   print_extended_vendor();
 
   boot_order = LibGetVariableAndSize(VarBootOrder, &gEfiGlobalVariableGuid, &size);
-  for (i = 0; i < size/sizeof(UINT16); i++) {
-    boot_option(ImageHandle, L"Hello Chain loader", *(boot_order+i));    
+  for (pos = boot_order; pos < boot_order + size; pos++) {
+    boot_option(ImageHandle, L"Hello Chain loader", *pos);    
   }
   FreePool(boot_order);
 
