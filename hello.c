@@ -16,7 +16,7 @@
 #include <efi.h>
 #include <efilib.h>
 
-static EFI_GUID gEfiGlobalVariableGuid = EFI_GLOBAL_VARIABLE;
+#define	LOADER L"\\EFI\\Microsoft\\Boot\\bootmgfw.efi"
 
 typedef struct registers registers;
 struct registers {
@@ -30,99 +30,96 @@ void Sleep(UINTN seconds_to_sleep) {
 	uefi_call_wrapper(BS->Stall, 1, seconds_to_sleep * 1000 * 1000);
 }	
 
-void cpuid(UINT32 *eax, UINT32 *ebx, UINT32 *ecx, UINT32 *edx) {
-	asm("cpuid;" :"+a" (*eax), "=b" (*ebx), "=c" (*ecx), "=d" (*edx));
+UINT64 rdmsr(UINT32 reg) {
+	UINT32 upper, lower;
+	asm("rdmsr;": "=d" (upper), "=a" (lower): "c" (reg));
+
+	return ((UINT64)upper << 32) + lower;
 }
 
-void rdmsr(UINT32 reg, UINT32 *upper, UINT32 *lower) {
-	asm("rdmsr;": "=d" (*upper), "=a" (*lower): "c" (reg));
-}
-
-void wrmsr(UINT32 reg, UINT32 upper, UINT32 lower) {
+void wrmsr(UINT32 reg, UINT64 value) {
+	UINT32 upper, lower;
+	upper = value >> 32;
+	lower = value & 0xffffffff;
+	Print(L"Writing %016lx to %08x\n", value, reg);
 	asm("wrmsr;": : "d" (upper), "a" (lower), "c" (reg));
 }
 
-void print_extended_vendor() {
-	union {
-		registers regs;
-		UINT8 buffer[sizeof(registers)];
-	} data;
-	CHAR8 vendor[50];
+void set_current_p_state(UINT8 num_p_state) {
+	UINT32 reg = 0xc0010062;
+	UINT64 value = rdmsr(reg);
 
-	data.regs.eax = 0x80000002;
-	cpuid(&data.regs.eax, &data.regs.ebx, &data.regs.ecx, &data.regs.edx);
-	CopyMem(vendor, data.buffer, sizeof(data.buffer));
-	data.regs.eax = 0x80000003;
-	cpuid(&data.regs.eax, &data.regs.ebx, &data.regs.ecx, &data.regs.edx);
-	CopyMem(vendor + 16, data.buffer, sizeof(data.buffer));
-	data.regs.eax = 0x80000004;
-	cpuid(&data.regs.eax, &data.regs.ebx, &data.regs.ecx, &data.regs.edx);
-	CopyMem(vendor + 32, data.buffer, sizeof(data.buffer));
-	Print(L"Extended vendor: %a\n", vendor);
+	value = (value & 0xFFFFFFFFFFFFFFF8) + (num_p_state & 0x7);
+
+	wrmsr(reg, value);
 }
 
-BOOLEAN load_boot_option(EFI_HANDLE ImageHandle, CHAR16* skipOption, UINT16 code, EFI_HANDLE* image) {
-	CHAR16 VarBoot[16] = { 0 };
-	EFI_STATUS err;
-	void* boot;
+void set_p_state(UINT8 num_p_state, UINTN fid, UINT8 did, UINT8 vid) {
+	UINT32 reg = 0xc0010064 + num_p_state;
+	UINT64 value = rdmsr(reg);
 
-	CHAR16* Description;
-	EFI_DEVICE_PATH* path;
+	value = (value & 0xFFFFFFFFFFFFFFC0) + (fid & 0x3F);
+	value = (value & 0xFFFFFFFFFFFFFE3F) + ((did & 0x7) << 6);
+	value = (value & 0xFFFFFFFFFFFE01FF) + ((vid & 0xFF) << 9);
 
-	SPrint(VarBoot, sizeof(VarBoot), L"Boot%04x", code);
-		boot = LibGetVariable(VarBoot, &gEfiGlobalVariableGuid);
-
-	Description = boot + sizeof(UINT32) + sizeof(UINT16);
-	
-	if (StrCmp(skipOption, Description) == 0) {
-		Print(L"Skipping Hello Chain loader.\n");
-		FreePool(boot);
-		return FALSE;
-	}
-
-	path = (void*)Description + StrSize(Description);
-
-	Print(L"Description: %s\n", Description);
-		Input(L"Press any key to boot this option.", NULL, 0);
-	err = uefi_call_wrapper(BS->LoadImage, 6, FALSE, ImageHandle, path , NULL, 0, image);
-
-	if (EFI_ERROR(err)) {
-		Print(L"Error loading %s: %r", Description, err);
-		FreePool(boot);
-		Sleep(3);
-		return FALSE;
-	}
-
-	FreePool(boot);
-	return TRUE;
+	wrmsr(reg, value);
 }
-
 
 EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
-	UINT16 *boot_order;
-	UINT16 *pos;
-	UINTN size;
 	EFI_HANDLE image;
 	EFI_STATUS err;
 
+	EFI_DEVICE_PATH *path;
+	EFI_LOADED_IMAGE *loaded_image;
+
 	InitializeLib(ImageHandle, SystemTable);
 
-	print_extended_vendor();
+	Input(L"Press any key to change current p-state", NULL, 0);
 
-	boot_order = LibGetVariableAndSize(VarBootOrder, &gEfiGlobalVariableGuid, &size);
+	set_current_p_state(4);
 
-	for (pos = boot_order; pos < boot_order + size; pos++) {
-		if (load_boot_option(ImageHandle, L"Hello Chain loader", *pos, &image)) {		
-			FreePool(boot_order);
-			err = uefi_call_wrapper(BS->StartImage, 3, image, NULL, NULL);
-			if (EFI_ERROR(err)) {
-				Print(L"Error starting selected image: %r", err);
-				Sleep(3);
-			}
-		}
+/*
+	Input(L"Press any key to change P0", NULL, 0);
+	set_p_state(0, 18, 0, 60);
+	Input(L"Press any key to change P1", NULL, 0);
+	set_p_state(1, 14, 0, 78);
+*/
+	Input(L"Press any key to change P2", NULL, 0);
+	set_p_state(2, 12, 0, 84);
+	Input(L"Press any key to change P3", NULL, 0);
+	set_p_state(3, 12, 0, 84);
+
+	Input(L"Press any key to change current p-state", NULL, 0);
+	set_current_p_state(1);
+	Input(L"Press any key to change current p-state", NULL, 0);
+	set_current_p_state(0);
+
+        err = uefi_call_wrapper(BS->OpenProtocol, 6, ImageHandle, &LoadedImageProtocol, (void **)&loaded_image,
+                                ImageHandle, NULL, EFI_OPEN_PROTOCOL_GET_PROTOCOL);
+        if (EFI_ERROR(err)) {
+                Print(L"Error getting a LoadedImageProtocol handle: %r ", err);
+		Sleep(3);
+                return err;
+        }
+
+	path = FileDevicePath(loaded_image->DeviceHandle, LOADER);
+
+        err = uefi_call_wrapper(BS->LoadImage, 6, FALSE, ImageHandle, path , NULL, 0, &image);
+        if (EFI_ERROR(err)) {
+                Print(L"Error loading image: %r\n", err);
+		Sleep(3);
+                return err;
+        }
+
+	FreePool(loaded_image);
+	FreePool(path);
+
+	Input(L"Press any key to continue", NULL, 0);
+
+	err = uefi_call_wrapper(BS->StartImage, 3, image, NULL, NULL);
+	if (EFI_ERROR(err)) {
+		Print(L"Error starting selected image: %r\n", err);
 	}
-
-	FreePool(boot_order);
 
 	Input(L"Press any key to continue", NULL, 0);
  
