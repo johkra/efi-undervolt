@@ -1,9 +1,22 @@
-Proof of concept code for efi boot loader which undervolts or overclocks a CPU before starting the OS.
+Proof of concept code for efi boot loader which undervolts or overclocks a CPU
+before starting the OS.
 
-Motivation: Changing an AMD CPU's highest frequency non-boost P-state at run-time on Windows 8 will cause severe graphical corruption. Depending on the BIOS, the frequency can be changed before starting the OS, but this leads to the deactivation of Cool and Quiet and Turbo mode. A user who wants to underclock and undervolt to minimize power consumption and noise will want to preserve Cool and Quiet to reduce both during system idle. Changing the P-states before starting the OS combines the flexibility of changing both frequency and voltage for P-states with the ability to preserve Cool and Quiet and if desired Turbo mode.
+**Current status**: Underclocking/Undervolting has been tested on an A10-5700 and
+works. Changing settings requires recompilation.
 
-Current status: The idea has been tested on an A10-5700 and works. Changing Turbo P-states will lead to a freeze. I am not sure yet what causes this, since changing Turbo states works fine once in Windows. The software is neither user-friendly nor sufficiently tested. Development is currently on hiatus because Summer is over (less heat for my CPU ;-)) and less free time leaves less time for both stressing the APU (playing computer games) and development.
+**Compilation**: The code has been developed on an Arch Linux 64 bit system.
+Install gnu-efi-libs and type make to compile.
 
-Compilation: The code has been developed on an Arch Linux 64 bit system and uses hard-coded library paths. Install gnu-efi-libs and type make to compile. Adjust the P-state settings for your CPU. VID is calculated using Vtarget = 1.55-VID*0.00625. The Multiplicator is encoded as numerator / divisor. FID is numerator - 0x10 and DID is the index of the divisor in the array {1,2,4,8,16}. Example: Multiplicator 34 is 34/1, FID is 34-0x10 = 18 and DID is 0. See Info.cpp functions EncodeMulti/EncodeVID of AmdMsrTweaker for code implementing these calculations.
+**Installation**: Copy the `undervolt.efi` file to the EFI system partition and
+add a boot entry from the UEFI firmware or using efibootmgr/EasyUEFI.
 
-Installation: The software assumes a hard-coded Windows boot loader on the same partition on which the software is installed. Usage from USB will probably not work. The actual installation can be done by copying the undervolt.efi file to the EFI system partition and adding a boot entry from the UEFI firmware or using efibootmgr.
+**Known issues**:
+
+* The code does not support multipliers below 16. I don't change idle P-states,
+  so I haven't bothered adding support. Please search for CoreCOF in the [BIOS
+and Kernel Developer Guide][BKDG] if you want to add support.
+* Only 15h (Trinity) APUs are supported. Check
+  [AmdMsrTweaker](https://github.com/mpollice/AmdMsrTweaker) or the relevant
+BKDG for required changes for other families.
+
+[BKDG]: https://support.amd.com/TechDocs/42301_15h_Mod_00h-0Fh_BKDG.pdf
