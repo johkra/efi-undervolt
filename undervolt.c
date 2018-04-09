@@ -18,6 +18,8 @@
 
 #define	LOADER L"\\EFI\\Microsoft\\Boot\\bootmgfw.efi"
 
+#define venc(vcore) ((1.55-vcore)/0.00625)
+
 UINT64 rdmsr(UINT32 reg) {
 	UINT32 upper, lower;
 	asm("rdmsr;": "=d" (upper), "=a" (lower): "c" (reg));
@@ -41,7 +43,7 @@ void set_current_p_state(UINT8 num_p_state) {
 	wrmsr(reg, value);
 }
 
-void configure_p_state(UINT8 num_p_state, UINT8 multi, double vcore) {
+void configure_p_state(UINT8 num_p_state, UINT8 multi, UINT8 vid) {
 	UINT32 reg = 0xc0010064 + num_p_state;
 	UINT64 value = rdmsr(reg);
 
@@ -49,7 +51,6 @@ void configure_p_state(UINT8 num_p_state, UINT8 multi, double vcore) {
 	UINTN fid = multi - 0x10;
 	// Hardcode divisor to 0; this requires multiplicator values > 16
 	UINT8 did = 0;
-	UINT8 vid = (1.55-vcore)/0.00625;
 
 	value = (value & 0xFFFFFFFFFFFFFFC0) + (fid & 0x3F);
 	value = (value & 0xFFFFFFFFFFFFFE3F) + ((did & 0x7) << 6);
@@ -88,11 +89,11 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
 	set_current_p_state(7);
 	disable_boost();
 
-	configure_p_state(0, 30, 1.0625);
-	configure_p_state(1, 30, 1.0625);
-	configure_p_state(2, 30, 1.0625);
-	configure_p_state(3, 28, 1.025);
-	configure_p_state(4, 26, 1.0);
+	configure_p_state(0, 30, venc(1.0625));
+	configure_p_state(1, 30, venc(1.0625));
+	configure_p_state(2, 30, venc(1.0625));
+	configure_p_state(3, 28, venc(1.025));
+	configure_p_state(4, 26, venc(1.));
 
 	enable_boost();
 
